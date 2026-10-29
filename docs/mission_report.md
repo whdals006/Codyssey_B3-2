@@ -648,3 +648,32 @@ main 브랜치의 독립 커밋: 통과
 모든 저장소 테스트 통과!
 ```
 
+
+## 7. CLI 및 REPL 구현하기
+
+* `shlex.split()`
+
+    - 따옴표를 인식해서 분리한다.
+
+* `execute_line()`
+
+    - 입력을 파싱하고 실행 결과를 처리하는 역할
+
+* `_dispatch()`
+
+    - 파싱된 명령어 맞는 기능을 실행한다.
+
+(예시)
+
+```
+사용자 입력: SWITCH feature
+            ↓
+shlex.split()으로 명령어와 인자 분리
+            ↓
+_dispatch()에서 SWITCH 처리
+            ↓
+repository.switch_branch("feature") 실행
+            ↓
+Switched to branch: feature
+```
+
