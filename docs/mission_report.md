@@ -457,3 +457,194 @@ a000 -> z999: None
 모든 그래프 테스트 통과!
 ```
 
+
+## 6. 저장소 및 브랜치 관리 구현하기
+
+이번 단계에서는 지금까지 만든 `Commit`, `CommitGraph`, `InvertedIndex`, `merge_sort()`를 하나로 연결한다.
+
+`respository.py`는 저장소 초기화, 브랜치 생성 및 전환, commit 생성, log 조회, 검색, 그래프 탐색을 담당한다.
+
+### 저장소 클래스의 역할
+
+`MiniGitRepository`는 지금까지 만든 파일들의 독립된 기능들을 연결하고 현재 저장소의 상태를 관리한다.
+
+### 브랜치와 HEAD의 관계
+
+`branches`는 브랜치 이름으로 `Branch` 객체를 찾는 딕셔너리이다.
+
+```python
+self.branches: dict[str, Branch] = {}
+```
+
+각 브랜치는 `head_hash`로 자신이 가리키는 commit을 기억한다.
+아직 commit이 하나도 없는 브랜치라면 `head_hash` 값은 `None`이다.
+
+### commit 생성과 해시 관리
+
+`creae_commit()`은 다음 순서로 실행된다.
+
+    ① 저장소가 초기화되어 있는지 확인한다.
+    ② commit message가 비어 있는지 검사한다.
+    ③ session 내에서 중복되지 않는 commit hash를 생성한다.
+    ④ 현재 HEAD를 새 commit의 부모로 설정한다.
+    ⑤ commit graph와 Inverted Index를 갱신한다.
+    ⑥ 현재 브랜치의 HEAD를 새 commit으로 변경한다.
+
+최초 commit에는 부모가 없다.
+
+```
+Initial commit
+parents = ()
+```
+
+두번째 commit부터는 현재 HEAD가 부모가 된다.
+
+```
+Initial commit
+      |
+Add login feature
+```
+
+### 저장소 기능 테스트
+
+```bash
+python3 - <<'PY'
+from mini_git.repository import (
+    MiniGitError,
+    MiniGitRepository,
+    UnknownBranchError,
+    UnknownCommitError,
+)
+
+repo = MiniGitRepository()
+
+# 1. 저장소 초기화
+assert repo.initialize("Alice")
+assert repo.initialized
+assert repo.current_branch == "main"
+assert repo.current_user == "Alice"
+print("저장소 초기화: 통과")
+
+# 2. 첫 번째 커밋 생성
+initial = repo.create_commit("Initial commit")
+assert initial.parents == ()
+assert repo.current_head_hash == initial.hash
+print("첫 번째 커밋:", initial.hash)
+
+# 3. 브랜치 생성 및 전환
+feature = repo.create_branch("feature")
+assert feature.head_hash == initial.hash
+
+repo.switch_branch("feature")
+login = repo.create_commit("Add login feature")
+
+assert login.parents == (initial.hash,)
+assert repo.current_head_hash == login.hash
+print("feature 브랜치 및 커밋 생성: 통과")
+
+# 4. main으로 돌아와 별도의 커밋 생성
+repo.switch_branch("main")
+payment = repo.create_commit("Add payment feature")
+
+assert payment.parents == (initial.hash,)
+assert repo.current_head_hash == payment.hash
+print("main 브랜치의 독립 커밋: 통과")
+
+# 5. 부모 우선 기본 로그
+commits = repo.list_commits()
+hashes = [commit.hash for commit in commits]
+print("기본 LOG:", hashes)
+
+position = {
+    commit.hash: index
+    for index, commit in enumerate(commits)
+}
+
+for commit in commits:
+    for parent_hash in commit.parents:
+        assert position[parent_hash] < position[commit.hash]
+
+print("부모 우선 로그: 통과")
+
+# 6. 날짜 및 작성자 정렬
+by_date = repo.list_commits(sort_by="date")
+by_author = repo.list_commits(sort_by="author")
+
+assert by_date[0].timestamp <= by_date[-1].timestamp
+assert [
+    commit.author.casefold() for commit in by_author
+] == [
+    "alice" for commit in by_author
+]
+
+print("날짜 및 작성자 정렬: 통과")
+
+# 7. 키워드 및 작성자 검색
+login_results = repo.search_keyword("LOGIN")
+assert [commit.hash for commit in login_results] == [login.hash]
+
+multi_results = repo.search_keyword("login feature")
+assert [commit.hash for commit in multi_results] == [login.hash]
+
+author_results = repo.search_author("alice")
+assert len(author_results) == 3
+
+print("키워드 및 작성자 검색: 통과")
+
+# 8. 그래프 탐색
+path = repo.find_shortest_path(login.hash, payment.hash)
+assert path == [
+    login.hash,
+    initial.hash,
+    payment.hash,
+]
+
+ancestors = repo.get_ancestors(login.hash)
+assert [commit.hash for commit in ancestors] == [initial.hash]
+
+print("최단 경로 및 조상 탐색: 통과")
+
+# 9. 잘못된 입력 확인
+try:
+    repo.switch_branch("unknown")
+except UnknownBranchError:
+    print("존재하지 않는 브랜치 처리: 통과")
+else:
+    raise AssertionError("존재하지 않는 브랜치가 허용되었습니다.")
+
+try:
+    repo.find_shortest_path(login.hash, "unknown")
+except UnknownCommitError:
+    print("존재하지 않는 커밋 처리: 통과")
+else:
+    raise AssertionError("존재하지 않는 커밋이 허용되었습니다.")
+
+try:
+    repo.create_commit("   ")
+except MiniGitError:
+    print("빈 커밋 메시지 처리: 통과")
+else:
+    raise AssertionError("빈 커밋 메시지가 허용되었습니다.")
+
+print("모든 저장소 테스트 통과!")
+PY
+```
+
+결과
+
+```
+저장소 초기화: 통과
+첫 번째 커밋: 000000000001
+feature 브랜치 및 커밋 생성: 통과
+main 브랜치의 독립 커밋: 통과
+기본 LOG: [...]
+부모 우선 로그: 통과
+날짜 및 작성자 정렬: 통과
+키워드 및 작성자 검색: 통과
+최단 경로 및 조상 탐색: 통과
+존재하지 않는 브랜치 처리: 통과
+존재하지 않는 커밋 처리: 통과
+빈 커밋 메시지 처리: 통과
+모든 저장소 테스트 통과!
+```
+
