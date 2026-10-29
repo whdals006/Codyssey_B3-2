@@ -677,3 +677,23 @@ repository.switch_branch("feature") 실행
 Switched to branch: feature
 ```
 
+
+## 8. README 작성 및 전체 기능 최종 점검
+
+### .gitignore 작성
+
+```
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+```
+
+| 항목 | 역할 |
+| :--- | :--- |
+| \__pycache__/ | Python이 생성하는 바이트코드 캐시 디렉터리 제외 |
+| *.py[cod] | Python 바이트코드 파일 제외 |
+| .venv/ | 프로젝트의 가상환경 디렉터리 제외 |
+| venv/ | 일반적인 이름의 가상환경 디렉터리 제외 |
+
+
