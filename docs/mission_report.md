@@ -226,3 +226,234 @@ alice 검색: ['a001', 'a002']
 
 이 결과로 `키워드 검색`, `여러 단어의 교집합 검색`, `작성자 검색`, `없는 키워드 검색` 까지 확인할 수 있다.
 
+
+## 5. Commit Graph 와 탐색 알고리즘 구현하기
+
+### commit graph의 구조 이해하기
+
+Git의 commit은 단순한 목록이 아니라, 각 commit이 부모 commit을 가리키는 graph 구조이다.
+
+* `DAG` (Directed Acyclic Graph, 방향성 비순환 그래프)
+
+    - **방향성**: 부모에서 자식으로 향하는 방향이 있다.
+    - **비순환**: 어떤 commit에서 출발해 edge 방향대로 이동해서 다시 자기 자신으로 돌아올 수 없다.
+    - **다중 부모**: commit은 부모가 업거나 하나 또는 여러개일 수 있다.
+
+이번 코드에서는 2개의 딕셔너리로 commit 관계를 관리한다.
+
+```python
+self.commits: dict[str, Commit] = {}
+self.children: dict[str, list[str]] = {}
+```
+
+`commits`은 해시로 commit을 빠르게 찾고,
+`chidren`은 특정 commit의 자식 commit들을 조회하는 역할을 한다.
+
+`Commit.parents`에는 부모 해시가 저장되고,
+`children`에는 자식 해시가 저장된다.
+
+따라서 부모 방향과 자식 방향 모두 탐색할 수 있다.
+
+**왜 사이클이 생기지 않을까?**
+
+`add_commit()`에서는 부모로 지정한 commit이 이미 존재하는지 검사한다.
+새 commit이 기존 commit을 부모로 삼을 수 있지만, 기존 commit이 아직 존재하지 않는 새 commit을 새 부모로 삼는 상황은 만들 수 없다.
+따라서 이 방식으로 commit을 추가하는 한 cycle이 생기지 않는다.
+
+### 기본 LOG: 위상정렬
+
+기본 `LOG`는 최신 commit부터 출력하는 방식이 아니라, 반드시 부모 commit이 자식 commit보다 먼저 출력되어야 한다.
+
+이 조건을 만족시키는 알고리즘이 **위상 정렬(Topological Sort)**이다.
+
+이번 코드에서는 **Kahn 알고리즘**을 사용한다.
+
+핵심 흐름은 다음과 간다.
+
+    ① 각 commit이 가진 부모의 수를 계산한다.
+    ② 부모가 없는 commit부터 처리 목록에 넣는다.
+    ③ commit을 처리하면서 자식 commit들의 부모 수를 하나씩 줄인다.
+    ④ 부모 수가 0이 된 자식 commit을 처리 목록에 추가한다.
+    ⑤ 모든 commit이 처리될 때까지 반복한다.
+
+위상 정렬의 시간복잡도는 vertex(=node) 수를 V, edge 수를 E 라고 할 때, **O(V+E)** 이다.
+
+### ANCESTORS: DFS로 모든 조상 찾기
+
+`ANCESTORS`는 특정 commit보다 앞선 모든 조상 commit을 찾아야 한다.
+
+이번 코드에서는 DFS(Depth First Search)를 사용한다.
+
+```python
+stack = list(self.commits[commit_hash].parents)
+```
+
+대상 commit의 부모를 stack에 넣고, 하나씩 꺼내 그 부모들을 다시 stack에 넣는 방식이다.
+
+```python
+if current_hash in ancestor_hashes:
+    continue
+```
+
+이 부분은 이미 방문한 commit을 다시 처리하지 않게 막는 역할을 한다.
+여러 commit이 같은 조상을 공유할 수 있으므로 중복 방문 방지는 중요한다.
+
+조상을 찾는 탐색 자체는 O(V+E)의 시간복잡도를 가진다.
+최종 결과는 위상 정렬 순서에 맞춰 반환하기 때문에 부모가 자식보다 먼저 출력된다.
+
+### PATH: BFS로 최단 경로 찾기
+
+`PATH`는 commit을 연결하는 edge 수가 가장 적은 경로를 찾아야 한다.
+
+특히 이번 미션에서는 부모 방향으로만 이동하는 것이 아니라, **부모,자식 연결을 무방향 edge로 취급**한다.
+
+**BFS를 사용하는 이유**
+
+BFS(Breadth-First Search)는 시작점에서 가까운 vertex부터 차례대로 탐색을 한다. 따라서 처음 도착점을 발견한 경로는 edge 수 기준으로 최단 경로이다.
+
+코드에서는 `previous` 딕셔너리에 각 node에 도달하기 직전에 node를 저장한다.
+
+```python
+previous[neighbor_hash] = current_hash
+```
+
+도착점에 도달하면 `_restore_path()`에서 이 기록을 역으로 따라가 전체 경로를 복원한다.
+
+**최단 경로가 여러 개라면?**
+
+요구사항에서는 같은 길이의 경로가 여러 개라면 `hash1 -> hash2 -> ...` 문자열이 사전순으로 가장 작은 경로를 선택해야 한다.
+
+이를 위해 각 node의 이웃 목록을 직접 구현한 `merge_sort()`로 정렬한다.
+
+```python
+neighbors = merge_sort(
+    neighbors,
+    key=lambda value: value,
+)
+```
+
+일반적으로 BFS의 시간복잡도는 O(V+E)지만, 이 구현은 사전순 선택을 위해 각 vertex의 이웃을 정렬하므로 정렬 비용이 추가된다.
+
+각 vertex의 이웃 수를 $d_v$라고 할 때 추가 비용은 대략 다음과 같다.
+
+$$
+O\left(\sum_v d_v\log d_v\right)
+$$
+
+### 그래프 기능 테스트
+
+```bash
+python3 - <<'PY'
+from mini_git.models import Commit
+from mini_git.graph import CommitGraph
+
+graph = CommitGraph()
+
+# 공통 조상
+graph.add_commit(
+    Commit("a000", "Initial commit", "Alice", 1000.0)
+)
+
+# 두 갈래의 커밋
+graph.add_commit(
+    Commit("b001", "Branch A", "Alice", 1100.0, ("a000",))
+)
+graph.add_commit(
+    Commit("b002", "Branch B", "Bob", 1200.0, ("a000",))
+)
+
+# 두 부모를 가진 그래프 노드.
+# 그래프 알고리즘을 테스트하기 위한 데이터이며 merge 명령은 구현하지 않는다.
+graph.add_commit(
+    Commit(
+        "c000",
+        "Join branches",
+        "Alice",
+        1300.0,
+        ("b001", "b002"),
+    )
+)
+
+# 별도의 연결 요소: a000과 연결되지 않은 커밋
+graph.add_commit(
+    Commit("z999", "Independent commit", "Bob", 1400.0)
+)
+
+# 1. 위상 정렬 테스트
+ordered = graph.topological_order()
+ordered_hashes = [commit.hash for commit in ordered]
+
+print("위상 정렬:", ordered_hashes)
+
+position = {
+    commit.hash: index
+    for index, commit in enumerate(ordered)
+}
+
+for commit in ordered:
+    for parent_hash in commit.parents:
+        assert position[parent_hash] < position[commit.hash]
+
+print("부모 우선 순서: 통과")
+
+# 2. 조상 탐색 테스트
+ancestors = graph.get_ancestors("c000")
+ancestor_hashes = [commit.hash for commit in ancestors]
+
+print("c000의 조상:", ancestor_hashes)
+
+assert set(ancestor_hashes) == {"a000", "b001", "b002"}
+assert "c000" not in ancestor_hashes
+
+print("조상 탐색: 통과")
+
+# 3. 최단 경로 테스트
+path = graph.shortest_path("b001", "b002")
+print("b001 -> b002:", path)
+
+assert path == ["b001", "a000", "b002"]
+print("최단 경로: 통과")
+
+# 4. 사전순 동률 경로 테스트
+path = graph.shortest_path("a000", "c000")
+print("a000 -> c000:", path)
+
+assert path == ["a000", "b001", "c000"]
+print("사전순 경로 선택: 통과")
+
+# 5. 경로가 없는 경우
+path = graph.shortest_path("a000", "z999")
+print("a000 -> z999:", path)
+
+assert path is None
+print("경로 없음 처리: 통과")
+
+# 6. 존재하지 않는 부모 방지 테스트
+try:
+    graph.add_commit(
+        Commit("bad1", "Invalid parent", "Alice", 1500.0, ("unknown",))
+    )
+except ValueError as error:
+    print("잘못된 부모 처리:", error)
+else:
+    raise AssertionError("존재하지 않는 부모가 허용되었습니다.")
+
+print("모든 그래프 테스트 통과!")
+PY
+```
+
+결과값
+
+```
+b001 -> b002: ['b001', 'a000', 'b002']
+최단 경로: 통과
+
+a000 -> c000: ['a000', 'b001', 'c000']
+사전순 경로 선택: 통과
+
+a000 -> z999: None
+경로 없음 처리: 통과
+
+모든 그래프 테스트 통과!
+```
+
